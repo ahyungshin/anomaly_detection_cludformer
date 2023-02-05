@@ -1,0 +1,2 @@
+python -u main.py --anormly_ratio 1 --num_epochs 3   --batch_size 8  --mode train --dataset SWAT  --data_path /data/shinahyung/code/1AnoFormer/1129/dataset/SWAT --input_c 51    --output_c 51
+python -u main.py --anormly_ratio 1  --num_epochs 10      --batch_size 8     --mode test    --dataset SWAT   --data_path /data/shinahyung/code/1AnoFormer/1129/dataset/SWAT  --input_c 51    --output_c 51  --pretrained_model 20
