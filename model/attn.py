@@ -17,7 +17,7 @@ class TriangularCausalMask():
     def mask(self):
         return self._mask
 
-
+# For temporal attention
 class AnomalyAttention(nn.Module):
     def __init__(self, win_size, mask_flag=True, scale=None, attention_dropout=0.0, output_attention=False):
         super(AnomalyAttention, self).__init__()
@@ -32,7 +32,7 @@ class AnomalyAttention(nn.Module):
                 self.distances[i][j] = abs(i - j)
 
     def forward(self, queries, keys, values, sigma, attn_mask):
-        B, C, H, L, E = queries.shape #[bs, 25(C), head(8), 100(len), 64(dim/H)]
+        B, C, H, L, E = queries.shape 
         scale = self.scale or 1. / sqrt(E)
 
         scores = queries @ keys.transpose(-1,-2)
@@ -41,10 +41,9 @@ class AnomalyAttention(nn.Module):
             if attn_mask is None:
                 attn_mask = TriangularCausalMask(B, L, device=queries.device)
             scores.masked_fill_(attn_mask.mask, -np.inf)
-        attn = scale * scores # [bs,25,8,100,100] 
+        attn = scale * scores 
 
-        if sigma is not None: #[bs, 25(C), head(8), 100(len)]
-            # sigma = sigma.transpose(1, 2)  # B L H ->  B H L
+        if sigma is not None: 
             window_size = attn.shape[-1] # except CLS
             sigma = torch.sigmoid(sigma * 5) + 1e-5
             sigma = torch.pow(3, sigma) - 1
@@ -92,10 +91,10 @@ class AttentionLayer(nn.Module):
         H = self.n_heads
         x = queries
 
-        queries = self.query_projection(queries).view(B, L, C, H, -1).permute(0,2,3,1,4) # [bs,100,25,dim] -> [bs, 100(len), 25(C), head(8), 64(dim/H)]
+        queries = self.query_projection(queries).view(B, L, C, H, -1).permute(0,2,3,1,4) 
         keys = self.key_projection(keys).view(B, L, C, H, -1).permute(0,2,3,1,4)
         values = self.value_projection(values).view(B, L, C, H, -1).permute(0,2,3,1,4)
-        sigma = self.sigma_projection(x).view(B, L, C, H).permute(0,2,3,1)  # except CLS     # [bs,100,25,dim] -> [bs, 100(len), 25(C), head(8)] 
+        sigma = self.sigma_projection(x).view(B, L, C, H).permute(0,2,3,1) 
 
         out, series, prior, sigma = self.inner_attention(
             queries,
@@ -110,6 +109,7 @@ class AttentionLayer(nn.Module):
 
 #------------------------------------------------------------------
 
+# For channel attention
 class AnomalyAttention_new(nn.Module):
     def __init__(self, win_size, mask_flag=True, scale=None, attention_dropout=0.0, output_attention=False):
         super(AnomalyAttention_new, self).__init__()
@@ -120,7 +120,7 @@ class AnomalyAttention_new(nn.Module):
 
 
     def forward(self, queries, keys, values, attn_mask):
-        B, C, H, L, E = queries.shape #[bs, 25(C), head(8), 100(len), 64(dim/H)]
+        B, C, H, L, E = queries.shape 
         scale = self.scale or 1. / sqrt(E)
 
         scores = queries @ keys.transpose(-1,-2)
@@ -129,7 +129,7 @@ class AnomalyAttention_new(nn.Module):
             if attn_mask is None:
                 attn_mask = TriangularCausalMask(B, L, device=queries.device)
             scores.masked_fill_(attn_mask.mask, -np.inf)
-        attn = scale * scores # [bs,25,8,100,100] 
+        attn = scale * scores 
 
         series = self.dropout(torch.softmax(attn, dim=-1))
         V = series @ values
@@ -152,8 +152,6 @@ class AttentionLayer_new(nn.Module):
                                         d_keys * n_heads)
         self.value_projection = nn.Linear(d_model,
                                           d_values * n_heads)
-        # self.sigma_projection = nn.Linear(d_model,
-        #                                   n_heads)
         self.out_projection = nn.Linear(d_values * n_heads, d_model)
 
         self.n_heads = n_heads
@@ -167,7 +165,6 @@ class AttentionLayer_new(nn.Module):
         queries = self.query_projection(queries).view(B, L, C, H, -1).permute(0,2,3,1,4) # [bs,100,25,dim] -> [bs, 100(len), 25(C), head(8), 64(dim/H)]
         keys = self.key_projection(keys).view(B, L, C, H, -1).permute(0,2,3,1,4)
         values = self.value_projection(values).view(B, L, C, H, -1).permute(0,2,3,1,4)
-        # sigma = self.sigma_projection(x).view(B, L, C, H).permute(0,2,3,1)             # [bs,100,25,dim] -> [bs, 100(len), 25(C), head(8)] 
 
         out = self.inner_attention(
             queries,

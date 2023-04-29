@@ -11,14 +11,6 @@ from data_factory.data_loader import get_loader_segment
 import random
 import torch.backends.cudnn as cudnn
 
-seed=103
-torch.manual_seed(seed)
-torch.cuda.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-np.random.seed(seed)
-cudnn.benchmark = False
-cudnn.deterministic = True
-random.seed(seed)
 
 def my_kl_loss(p, q):
     res = p * (torch.log(p + 0.0001) - torch.log(q + 0.0001))
@@ -98,7 +90,7 @@ class Solver(object):
         self.criterion = nn.MSELoss()
 
     def build_model(self):
-        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, e_layers=3)
+        self.model = AnomalyTransformer(win_size=self.win_size, enc_in=self.input_c, c_out=self.output_c, cluster_temporal=self.cluster_temporal, cluster_channel=self.cluster_channel, e_layers=3)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
         if torch.cuda.is_available():
@@ -213,7 +205,7 @@ class Solver(object):
     def test(self):
         self.model.load_state_dict(
             torch.load(
-                os.path.join(str(self.model_save_path), str(self.dataset) + '_checkpoint.pth')))
+                os.path.join(str(self.model_save_path), str(self.dataset) + '_checkpoint.pth')), strict=False)
         self.model.eval()
         temperature = 50
 

@@ -45,7 +45,6 @@ class DataEmbedding(nn.Module):
         super(DataEmbedding, self).__init__()
 
         self.c_in = c_in
-        # self.value_embedding = TokenEmbedding(c_in=c_in, d_model=d_model)
         self.value_embedding = TokenEmbedding(c_in=1, d_model=d_model)
         self.position_embedding = PositionalEmbedding(d_model=d_model)
 
@@ -55,18 +54,17 @@ class DataEmbedding(nn.Module):
 
 
     def forward(self, x):
-        # x = self.value_embedding(x) + self.position_embedding(x)
 
         enc_out = [None] * self.c_in
         for ch in range(self.c_in):
             enc_out[ch] = self.value_embedding(x[:,:,ch].unsqueeze(2)).unsqueeze(0)
-        val_emb = torch.cat(enc_out).permute(1,2,0,3) # [bs,100,C,D]
+        val_emb = torch.cat(enc_out).permute(1,2,0,3) # [B,L,C,D]
 
         #- CLS token
-        cls_tokens = self.cls_tokens.repeat(val_emb.shape[0],1,1,1) # [bs,1,C,D]
-        val_emb = torch.cat([cls_tokens, val_emb], dim=1) # [bs,101,channel,dim]
+        cls_tokens = self.cls_tokens.repeat(val_emb.shape[0],1,1,1) # [B,1,C,D]
+        val_emb = torch.cat([cls_tokens, val_emb], dim=1) # [B,L+1,C,D]
 
         pos_emb = self.position_embedding(x).unsqueeze(2).repeat(1,1,self.c_in,1)
         x = val_emb + pos_emb
 
-        return self.dropout(x)  # [bs,100,channel,dim]
+        return self.dropout(x)  # [B,L+1,C,D]

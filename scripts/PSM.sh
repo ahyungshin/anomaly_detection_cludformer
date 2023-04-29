@@ -1,2 +1,21 @@
-python -u main.py --anormly_ratio 1 --num_epochs 3    --batch_size 16  --mode train --dataset PSM  --data_path /data/shinahyung/code/1AnoFormer/1129/dataset/PSM --input_c 25    --output_c 25
-python -u main.py --anormly_ratio 1  --num_epochs 10       --batch_size 16     --mode test    --dataset PSM   --data_path /data/shinahyung/code/1AnoFormer/1129/dataset/PSM  --input_c 25    --output_c 25  --pretrained_model 20
+python -u main.py --anormly_ratio 1 \
+                    --num_epochs 10    \
+                    --cluster_temporal 30 \
+                    --cluster_channel 4 \
+                    --batch_size 16  \
+                    --mode train \
+                    --dataset PSM  \
+                    --data_path /path/to/dataset/ \
+                    --input_c 25    \
+                    --output_c 25
+python -u main.py --anormly_ratio 1  \
+                    --num_epochs 10       \
+                    --cluster_temporal 30 \
+                    --cluster_channel 4 \
+                    --batch_size 16     \
+                    --mode test    \
+                    --dataset PSM   \
+                    --data_path /path/to/dataset/  \
+                    --input_c 25    \
+                    --output_c 25  \
+                    --pretrained_model 20

@@ -12,12 +12,10 @@ class EncoderLayer(nn.Module):
         d_ff = d_ff or 4 * d_model
         self.attention = attention
         self.attention_c = attention_new
-        # self.conv1 = nn.Conv1d(in_channels=d_model, out_channels=d_ff, kernel_size=1)
-        # self.conv2 = nn.Conv1d(in_channels=d_ff, out_channels=d_model, kernel_size=1)
-        self.conv1 = nn.Linear(in_features=d_model, out_features=d_ff)
-        self.conv2 = nn.Linear(in_features=d_ff, out_features=d_model)
+        self.conv1 = nn.Linear(in_features=d_model, out_features=d_ff) # del
+        self.conv2 = nn.Linear(in_features=d_ff, out_features=d_model) # del
+        self.linear_channel = nn.Linear(in_features=4, out_features=55) # del
 
-        self.linear_channel = nn.Linear(in_features=4, out_features=55)
         self.conv3 = nn.Linear(in_features=d_model, out_features=d_ff)
         self.conv4 = nn.Linear(in_features=d_ff, out_features=d_model)
         self.norm1 = nn.LayerNorm(d_model)
@@ -25,46 +23,49 @@ class EncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.activation = F.relu if activation == "relu" else F.gelu
 
-    def forward(self, x, layer, attn_mask=None): # [bs,101,25,dim]
+    def forward(self, x, layer, attn_mask=None, cluster_temporal=None, cluster_channel=None):
 
         B, L, C, D = x.shape
         ori_x = x.clone()
 
+        #- Temporal clustering
         if layer==0:
-            #- Temporal clustering
             feats_t = [None] * C
             cluster_t = [None] * C
             for ch in range(C):
-                idx_cluster_t, cluster_num_t = cluster_dpc_knn(ori_x[:,1:,ch,:], cluster_num=20, k=20) # [bs,100,dim] -> [bs,100]
-                clustered_feats_t = merge_tokens(ori_x[:,1:,ch,:].unsqueeze(1), idx_cluster_t, cluster_num_t) # [bs,1,20,dim]
-                feats_t[ch] = clustered_feats_t.permute(1,0,2,3) # [1,bs,20,dim]
+                idx_cluster_t, cluster_num_t = cluster_dpc_knn(ori_x[:,1:,ch,:], cluster_num=cluster_temporal, k=20) # [B,L,D] -> [B,L]
+                clustered_feats_t = merge_tokens(ori_x[:,1:,ch,:].unsqueeze(1), idx_cluster_t, cluster_num_t) # [B,1,cluster,D]
+                feats_t[ch] = clustered_feats_t.permute(1,0,2,3) # [1,B,cluster,D]
                 cluster_t[ch] = idx_cluster_t.unsqueeze(0)
-            feats_t = torch.cat(feats_t, dim=0).permute(1,0,2,3) # [bs,25,20,dim]
-            feats_t = feats_t.permute(0,2,1,3) # [bs,20,25,D]
-            cluster_t = torch.cat(cluster_t, dim=0).permute(1,0,2) # [bs,25,100]
+            feats_t = torch.cat(feats_t, dim=0).permute(1,0,2,3) # [B,C,cluster,D]
+            feats_t = feats_t.permute(0,2,1,3) # [B,cluster,C,D]
+            cluster_t = torch.cat(cluster_t, dim=0).permute(1,0,2) # [B,C,L]
 
-            idx_cluster_t = cluster_t.unsqueeze(-1).repeat(1,1,1,D).permute(0,2,1,3) # [bs,100,25,D]
-            x = torch.gather(feats_t, 1, idx_cluster_t) # [bs,100,25,D]
+            idx_cluster_t = cluster_t.unsqueeze(-1).repeat(1,1,1,D).permute(0,2,1,3) # [B,L,C,D]
+            x = torch.gather(feats_t, 1, idx_cluster_t) # [B,L,C,D]
             x = torch.cat([ori_x[:,0,:,:].unsqueeze(1), x], dim=1)
             
-        #- Original self-attention & FFN
+        #- Self-attention
         new_x1, attn, mask, sigma = self.attention(
             x, x, x,
             attn_mask=attn_mask
         )
-        #- clustering
-        idx_cluster, cluster_num = cluster_dpc_knn(ori_x[:,0,:,:], cluster_num=6, k=5) # [bs,25,dim] -> [bs,25]
-        clustered_feats = merge_tokens(ori_x[:,:,:,:], idx_cluster, cluster_num) # [bs,101,4,128]
+
+        #- Channel clustering (all layer)
+        idx_cluster, cluster_num = cluster_dpc_knn(ori_x[:,0,:,:], cluster_num=cluster_channel, k=5) # [B,D,D] -> [B,C]
+        clustered_feats = merge_tokens(ori_x[:,:,:,:], idx_cluster, cluster_num) # [B,L+1,cluster,D]
         idx_cluster = idx_cluster.unsqueeze(2).unsqueeze(1).repeat(1, x.shape[1], 1, x.shape[-1])
         clustered_feats = torch.gather(clustered_feats, 2, idx_cluster) # [B,L,C,D]
 
-        #- New channel-attention & FFN
+        #- Self-attention
         x = clustered_feats.permute(0,2,1,3) # [bs,4,101,128]
         new_x = self.attention_c(
             x, x, x,
             attn_mask=attn_mask
         )
         new_x2 = new_x.permute(0,2,1,3)
+
+        # Element-wise multiplication (feature fusion)
         new_x = new_x1 * new_x2
 
         #- FFN
@@ -72,16 +73,19 @@ class EncoderLayer(nn.Module):
         y = x = self.norm1(x) 
         y = self.dropout(self.activation(self.conv3(y)))
         y = self.dropout(self.conv4(y))
-        y = self.norm2(x + y)  # [bs,4,101,128]
+        y = self.norm2(x + y)
 
         return y, attn, mask, sigma
 
 
 class Encoder(nn.Module):
-    def __init__(self, attn_layers, norm_layer=None):
+    def __init__(self, attn_layers, cluster_temporal, cluster_channel, norm_layer=None):
         super(Encoder, self).__init__()
         self.attn_layers = nn.ModuleList(attn_layers)
         self.norm = norm_layer
+
+        self.cluster_temporal = cluster_temporal
+        self.cluster_channel = cluster_channel
 
     def forward(self, x, attn_mask=None):
         # x [B, L, D]
@@ -89,7 +93,7 @@ class Encoder(nn.Module):
         prior_list = []
         sigma_list = []
         for num, attn_layer in enumerate(self.attn_layers):
-            x, series, prior, sigma = attn_layer(x, layer=num, attn_mask=attn_mask)
+            x, series, prior, sigma = attn_layer(x, layer=num, attn_mask=attn_mask, cluster_temporal=self.cluster_temporal, cluster_channel=self.cluster_channel)
             series_list.append(series[:,:,:,1:,1:])
             prior_list.append(prior[:,:,:,1:,1:])
             sigma_list.append(sigma)
@@ -100,7 +104,7 @@ class Encoder(nn.Module):
         return x, series_list, prior_list, sigma_list
 
 class AnomalyTransformer(nn.Module):
-    def __init__(self, win_size, enc_in, c_out, d_model=128, n_heads=8, e_layers=3, d_ff=512,
+    def __init__(self, win_size, enc_in, c_out, cluster_temporal, cluster_channel, d_model=128, n_heads=8, e_layers=3, d_ff=512,
                  dropout=0.0, activation='gelu', output_attention=True):
         super(AnomalyTransformer, self).__init__()
         self.output_attention = output_attention
@@ -125,29 +129,33 @@ class AnomalyTransformer(nn.Module):
                     activation=activation
                 ) for l in range(e_layers)
             ],
+            cluster_temporal = cluster_temporal,
+            cluster_channel = cluster_channel,
             norm_layer=torch.nn.LayerNorm(d_model)
         )
 
-        # self.projection = nn.Linear(d_model*4, c_out, bias=True)
         self.projection = nn.Linear(d_model, 1, bias=True)
         self.cls_tokens = nn.Parameter(torch.randn(1,1,enc_in, d_model)) # [1,1,25,dim]
 
     def forward(self, x):
         #- embedding
-        enc_out = self.embedding(x) # [bs,100,channel,dim]
+        enc_out = self.embedding(x) # [B,L,C,D]
         
         #- encoder
         enc_out, series, prior, sigmas = self.encoder(enc_out) 
 
         #- inverse embedding
         enc_out = enc_out[:,1:,:,:]
-        enc_out = self.projection(enc_out).squeeze(3) # [bs,100,25]
+        enc_out = self.projection(enc_out).squeeze(3) # [B,L,C]
 
         if self.output_attention:
             return enc_out, series, prior, None
         else:
-            return enc_out  # [B, L, D]
+            return enc_out  # [B,L,D]
 
+
+# ------------------------------
+# https://github.com/zengwang430521/TCFormer
 
 def merge_tokens(token_dict, idx_cluster, cluster_num, token_weight=None):
     """Merge tokens in the same cluster to a single cluster.
@@ -163,28 +171,27 @@ def merge_tokens(token_dict, idx_cluster, cluster_num, token_weight=None):
 
     x = token_dict
 
-    B, L, N, C = x.shape # [bs,100,38,512]
+    B, L, N, C = x.shape 
     if token_weight is None:
-        token_weight = x.new_ones(B, N, 1) # [bs,100,38,1]
+        token_weight = x.new_ones(B, N, 1) 
 
-    idx_batch = torch.arange(B, device=x.device)[:, None] # [bs,1]
-    idx = idx_cluster + idx_batch * cluster_num # [bs,38] + [bs,1] = [bs,38]
+    idx_batch = torch.arange(B, device=x.device)[:, None] 
+    idx = idx_cluster + idx_batch * cluster_num 
 
     all_weight = token_weight.new_zeros(B * cluster_num, 1)
     all_weight.index_add_(dim=0, index=idx.reshape(B * N),
-                          source=token_weight.reshape(B * N, 1)) # [bs*4]
+                          source=token_weight.reshape(B * N, 1)) 
     all_weight = all_weight + 1e-6
     norm_weight = token_weight / all_weight[idx]
-    norm_weight = norm_weight.unsqueeze(1).repeat(1,L,1,1) # [bs,100,25,1]
+    norm_weight = norm_weight.unsqueeze(1).repeat(1,L,1,1)
 
     # average token features
-    # idx = idx.unsqueeze(1).repeat(1,L,1) # [bs,101,38]
-    x_merged = x.new_zeros(B*cluster_num, L, C) # [bsxcluster, 101, 512]
+    x_merged = x.new_zeros(B*cluster_num, L, C) 
     source = x * norm_weight
     x_merged.index_add_(dim=0, index=idx.reshape(B*N),
                         source=source.reshape(B*N, L, C).type(x.dtype))
     x_merged = x_merged.reshape(B, L, cluster_num, C)
-    return x_merged # [bs,101,cluster,512]
+    return x_merged 
 
 
 
@@ -249,6 +256,7 @@ def cluster_dpc_knn(token_dict, cluster_num, k=5, token_mask=None):
         idx_cluster[idx_batch.reshape(-1), index_down.reshape(-1)] = idx_tmp.reshape(-1)
 
     return idx_cluster, cluster_num
+
 
 def index_points(points, idx):
     """Sample features following the index.

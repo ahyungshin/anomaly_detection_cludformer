@@ -41,6 +41,8 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', type=str, default='./dataset/creditcard_ts.csv')
     parser.add_argument('--model_save_path', type=str, default='checkpoints')
     parser.add_argument('--anormly_ratio', type=float, default=4.00)
+    parser.add_argument('--cluster_temporal', type=int, default=20)
+    parser.add_argument('--cluster_channel', type=int, default=4)
 
     config = parser.parse_args()
 
