@@ -1,4 +1,4 @@
-# CluDFormer: Clustered Dual Attention Transformer for Multivariate Time Series Anomaly Detection
+# Multivariate Time Series Anomaly Detection
 
 ## Dataset
 Download data. You can obtain from Google Drive.
