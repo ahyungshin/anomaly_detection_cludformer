@@ -1,7 +1,7 @@
 # Multivariate Time Series Anomaly Detection
 
 ## Dataset
-Download data. You can obtain from Google Drive.
+Download data. You can obtain from Google Drive. (To be updated)
 
 
 ## Usage
